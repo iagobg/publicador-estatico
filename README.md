@@ -2,13 +2,13 @@
 
 Uma VPS acompanha uma pasta de um repositório no GitHub, publica os arquivos quando o conteúdo muda e confirma por HTTP o que um visitante recebe.
 
-## 1. Sobre o projeto e o problema resolvido
+## Caso de uso
 
 Quem hospeda um site de terceiros pode ter autorização para ler e republicar os arquivos, enquanto a administração do repositório fica com outra equipe. Nesse cenário, configurar GitHub Actions ou webhooks na origem depende de quem a mantém. Conferir a branch e copiar os arquivos manualmente pode deixar uma atualização passar. Durante a cópia, um visitante também pode receber arquivos de duas edições diferentes.
 
-A motivação veio de uma rotina pessoal de hospedagem em VPS. Esta implementação usa como exemplo um **boletim de laboratório** com HTML e CSS próprios. O operador escolhe a pasta publicável, e a VPS inicia todas as consultas. Uma edição repetida custa uma consulta à árvore e zero downloads de arquivos.
+O operador escolhe a pasta publicável, e a VPS inicia todas as consultas. Uma edição repetida custa uma consulta à árvore e zero downloads de arquivos. O repositório inclui um boletim em HTML e CSS para experimentar o fluxo completo.
 
-## 2. Arquitetura e fluxo de funcionamento
+## Como funciona
 
 ```mermaid
 flowchart TD
@@ -29,7 +29,7 @@ A árvore da branch chega em JSON. O Python filtra por pasta, tipo de objeto, ex
 
 Os downloads usam os hashes da árvore consultada. Assim, mesmo que a branch avance durante a cópia, os arquivos pertencem à mesma fotografia da origem. O publicador monta a pasta inteira antes de trocar `current`, a raiz do servidor web. Depois da troca, faz um GET de cada arquivo e compara seu conteúdo com o hash de origem. Se a leitura falhar, restaura o apontamento anterior. Na primeira publicação, a confirmação bem-sucedida estabelece a primeira versão recuperável.
 
-## 3. Tecnologias e APIs utilizadas
+## Tecnologias e integrações
 
 | Componente | Papel |
 | --- | --- |
@@ -38,7 +38,7 @@ Os downloads usam os hashes da árvore consultada. Assim, mesmo que a branch ava
 | Servidor HTTP da VPS | Serve a pasta ativa e responde à verificação independente do publicador. O exemplo de operação usa o Caddy. [Caddy file_server](https://caddyserver.com/docs/caddyfile/directives/file_server) |
 | systemd | Mantém o processo de polling ativo na VPS e direciona a saída para o journal. |
 
-## 4. Pré-requisitos e como executar
+## Instalação e uso
 
 Use Linux, Git e Python 3.10 ou superior. A biblioteca padrão cobre todas as dependências.
 
@@ -96,7 +96,9 @@ Para instalação persistente, siga o procedimento com usuário de serviço, rai
 
 **Escopo da publicação.** O site precisa conter um `index.html` na pasta selecionada. O filtro aceita arquivos web estáticos, ignora nomes ocultos, links simbólicos e submódulos, e rejeita árvores truncadas. Os limites por edição são 100 arquivos, 4 MiB por arquivo e 32 MiB no total. Publique apenas conteúdo cuja redistribuição esteja autorizada. O HTML e o JavaScript são entregues ao navegador como vieram da origem.
 
-## 5. Demonstração e resultados
+<a id="5-demonstração-e-resultados"></a>
+
+## Exemplos de execução
 
 **Com a API real do GitHub.** A partir de um clone novo, o publicador consultou a branch pública e ativou o boletim. Um cliente HTTP leu o HTML e o CSS do servidor local e comparou os bytes com os arquivos do clone. O segundo ciclo reconheceu a mesma versão.
 
@@ -113,9 +115,7 @@ O comando abaixo testa filtragem, autenticação, bloqueio de concorrência, rec
 python3 -m unittest discover -s tests -v
 ```
 
-O roteiro relaciona cada requisito à função que o implementa e propõe um ajuste que pode ser feito durante a arguição. [Apresentação prática de cinco minutos](docs/apresentacao.md)
-
-## 6. Melhorias futuras
+## Melhorias futuras
 
 - Usar requisições condicionais com ETag para reduzir a transferência da árvore nos ciclos sem alterações.
 - Respeitar o tempo de espera indicado pela API quando a cota de consultas se esgotar.
