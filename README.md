@@ -98,6 +98,11 @@ Para instalação persistente, siga o procedimento com usuário de serviço, rai
 
 ## 5. Demonstração e resultados
 
+**Com a API real do GitHub.** A partir de um clone novo, o publicador consultou a branch pública e ativou o boletim. Um cliente HTTP leu o HTML e o CSS do servidor local e comparou os bytes com os arquivos do clone. O segundo ciclo reconheceu a mesma versão.
+
+![Teste com api.github.com: dois arquivos confirmados, ciclo repetido sem downloads e duas respostas HTTP 200 com conteúdo idêntico ao clone.](docs/github-real.png)
+
+**Falha e recuperação reproduzíveis.**
 Captura de uma execução de `python3 demo.py --intervalo 1`. Na terceira consulta, a origem devolveu HTTP 503. Logo abaixo, o GET feito como visitante retornou HTTP 200 com a edição 1. A última consulta publicou a edição 2 e verificou os dois arquivos pelo servidor.
 
 ![Terminal com quatro ciclos: primeira edição publicada, versão repetida, falha HTTP 503 com a página ainda acessível e publicação da edição 2.](docs/demonstracao.png)
