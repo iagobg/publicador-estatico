@@ -85,13 +85,25 @@ class GitHub:
             raise Falha("configure GITHUB_REPO no formato conta/repositorio")
         if not branch or (pasta != "." and not caminho_publico(pasta)):
             raise Falha("confira GITHUB_BRANCH e SOURCE_DIR")
-        self.base = f"{api}/repos/{repo}/git"
+        self.base = f"{api}/repos/{repo}"
         self.branch = quote(branch, safe="")
         self.pasta = pasta
         self.token = token
 
-    def listar(self):
-        dados = baixar(f"{self.base}/trees/{self.branch}?recursive=1", 8 * MIB,
+    def revisao(self):
+        dados = baixar(f"{self.base}/branches/{self.branch}", MIB, "API de origem",
+                       accept="application/vnd.github+json", token=self.token)
+        try:
+            commit = json.loads(dados)["commit"]
+            sha, arvore = commit["sha"], commit["commit"]["tree"]["sha"]
+            if not all(re.fullmatch("[0-9a-f]{40}", valor) for valor in (sha, arvore)):
+                raise ValueError("SHA inválido")
+            return sha, arvore
+        except (KeyError, TypeError, ValueError) as erro:
+            raise Falha("resposta de branch inválida na origem") from erro
+
+    def listar(self, arvore):
+        dados = baixar(f"{self.base}/git/trees/{arvore}?recursive=1", 8 * MIB,
                        "API de origem", accept="application/vnd.github+json", token=self.token)
         try:
             return selecionar(json.loads(dados), self.pasta)
@@ -99,7 +111,7 @@ class GitHub:
             raise Falha("JSON de árvore inválido na origem") from erro
 
     def conteudo(self, arquivo):
-        dados = baixar(f"{self.base}/blobs/{arquivo.sha}", arquivo.tamanho, "API de origem",
+        dados = baixar(f"{self.base}/git/blobs/{arquivo.sha}", arquivo.tamanho, "API de origem",
                        accept="application/vnd.github.raw+json", token=self.token)
         if len(dados) != arquivo.tamanho or sha_blob(dados) != arquivo.sha:
             raise Falha("conteúdo recebido diverge do blob anunciado")

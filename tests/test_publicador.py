@@ -4,6 +4,7 @@ from functools import partial
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 from urllib.request import urlopen
 
 from demo import ApiLocal, Boletim, SiteLocal, servidor
@@ -39,6 +40,40 @@ class TestePublicacao(unittest.TestCase):
 
     def rodar(self, url=None):
         return ciclo(self.origem, self.base, url or self.site)
+
+    def test_commit_repetido_e_commit_so_de_documentacao(self):
+        with patch.object(self.origem, "listar", wraps=self.origem.listar) as listar, \
+             patch.object(self.origem, "conteudo", wraps=self.origem.conteudo) as baixar:
+            self.assertTrue(self.rodar()[0])
+            ativa = (self.base / "current").readlink()
+            self.assertIn("mesmo commit", self.rodar()[1])
+            self.assertEqual((listar.call_count, baixar.call_count), (1, 2))
+            self.boletim.arquivos["README.md"] = b"Documentacao"
+            self.boletim.comitar()
+            self.assertIn("mesmos arquivos", self.rodar()[1])
+            self.assertIn("mesmo commit", self.rodar()[1])
+            self.assertEqual((listar.call_count, baixar.call_count), (2, 2))
+            self.assertEqual((self.base / "current").readlink(), ativa)
+
+    def test_migracao_e_mudanca_de_pasta_no_mesmo_commit(self):
+        self.assertTrue(self.rodar()[0])
+        (self.base / "ultimo-commit.json").unlink()  # estado de uma instalação anterior
+        self.assertIn("mesmos arquivos", self.rodar()[1])
+        self.origem.pasta = "outra-pasta"
+        self.assertIn("PUBLICADO", self.rodar()[1])
+        self.assertEqual((self.base / "current/index.html").read_bytes(), b"Arquivo fora do site")
+
+    def test_branch_avanca_durante_o_download(self):
+        listar = self.origem.listar
+        def avancar_branch(arvore):
+            self.boletim.trocar_edicao(2)
+            return listar(arvore)
+        with patch.object(self.origem, "listar", side_effect=avancar_branch):
+            self.assertTrue(self.rodar()[0])
+        pagina = self.base / "current/index.html"
+        self.assertIn("Edição 1", pagina.read_text())
+        self.assertIn("PUBLICADO", self.rodar()[1])
+        self.assertIn("Edição 2", pagina.read_text())
 
     def test_reverte_quando_o_servidor_entrega_bytes_incorretos(self):
         self.assertTrue(self.rodar()[0])

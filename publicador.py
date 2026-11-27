@@ -12,7 +12,7 @@ import sys
 import time
 from urllib.parse import quote, urlsplit
 
-from origem import Falha, GitHub, baixar, sha_blob
+from origem import EXTENSOES, Falha, GitHub, baixar, sha_blob
 
 
 def ler_link(link):
@@ -53,20 +53,8 @@ def limpar_versoes(base):
             shutil.rmtree(pasta)
 
 
-def publicar(origem, base, url_site):
+def ativar(origem, arquivos, base, url_site, destino, anterior):
     atual, confirmado = base / "current", base / "confirmado"
-    anterior = ler_link(confirmado)
-    # Uma interrupção entre a troca e a confirmação é revertida no ciclo seguinte.
-    if ler_link(atual) != anterior:
-        apontar(atual, anterior)
-
-    arquivos = origem.listar()
-    manifesto = json.dumps([(a.caminho, a.sha) for a in arquivos]).encode()
-    versao = hashlib.sha256(manifesto).hexdigest()
-    destino = Path("versoes") / versao
-    if anterior == destino:
-        return f"SEM MUDANÇA | versão {versao[:10]} | nenhum blob baixado"
-
     if not (base / destino).exists():
         preparar(origem, arquivos, base / destino)
     apontar(atual, destino)
@@ -80,7 +68,39 @@ def publicar(origem, base, url_site):
     except (Falha, OSError):
         apontar(atual, anterior)
         raise
-    return f"PUBLICADO | versão {versao[:10]} | {len(arquivos)} arquivos confirmados via HTTP"
+
+
+def publicar(origem, base, url_site):
+    atual, confirmado = base / "current", base / "confirmado"
+    anterior = ler_link(confirmado)
+    # Uma interrupção entre a troca e a confirmação é revertida no ciclo seguinte.
+    if ler_link(atual) != anterior:
+        apontar(atual, anterior)
+
+    commit, arvore = origem.revisao()
+    registro = base / "ultimo-commit.json"
+    estado = {"origem": origem.base, "branch": origem.branch, "pasta": origem.pasta,
+              "extensoes": sorted(EXTENSOES), "commit": commit, "versao": str(anterior)}
+    if (anterior and (atual / "index.html").is_file() and registro.is_file()
+            and registro.read_bytes() == json.dumps(estado).encode()):
+        return f"SEM MUDANÇA | mesmo commit {commit[:10]} | árvore dispensada"
+
+    arquivos = origem.listar(arvore)
+    manifesto = json.dumps([(a.caminho, a.sha) for a in arquivos]).encode()
+    versao = hashlib.sha256(manifesto).hexdigest()
+    destino = Path("versoes") / versao
+    if anterior == destino and (atual / "index.html").is_file():
+        mensagem = f"SEM MUDANÇA | commit {commit[:10]} conferido | mesmos arquivos"
+    else:
+        ativar(origem, arquivos, base, url_site, destino, anterior)
+        mensagem = f"PUBLICADO | commit {commit[:10]} | {len(arquivos)} arquivos confirmados via HTTP"
+
+    # Uma falha anterior a este ponto deixa o mesmo commit elegível para nova tentativa.
+    estado["versao"] = str(destino)
+    temporario = registro.with_suffix(".novo")
+    temporario.write_text(json.dumps(estado), encoding="ascii")
+    os.replace(temporario, registro)
+    return mensagem
 
 
 def ciclo(origem, base, url_site):

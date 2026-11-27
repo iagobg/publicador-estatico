@@ -35,6 +35,8 @@ O exemplo usa systemd, Python 3.10+ e Caddy já instalados. Execute os comandos 
    curl --fail http://127.0.0.1:8080/
    ```
 
+Em instalações anteriores à checagem por commit, o primeiro ciclo compara a árvore com a edição confirmada e cria `ultimo-commit.json` no diretório de estado. Os próximos ciclos usam esse registro. Uma mudança na origem, na branch ou na pasta exige nova comparação.
+
 Ao mudar o arquivo de ambiente, reinicie a unidade. Para interromper as consultas, use `sudo systemctl stop publicador-estatico.service`. O servidor continua servindo a versão confirmada.
 
 Um erro HTTP 401 ou 403 pede revisão da credencial, das permissões e da cota da API. Um 404 da origem pode indicar branch ou repositório incorreto (confira também o acesso a um repositório privado). Se a mensagem citar o servidor web, verifique `SITE_URL`, a raiz `current` e a permissão de leitura do servidor. O próximo ciclo repete a tentativa. Cada requisição tem timeout de 10 segundos.

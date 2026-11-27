@@ -4,6 +4,7 @@ import argparse
 from contextlib import ExitStack, contextmanager
 from functools import partial
 from http.server import BaseHTTPRequestHandler, SimpleHTTPRequestHandler, ThreadingHTTPServer
+import hashlib
 import json
 from pathlib import Path
 import secrets
@@ -19,6 +20,8 @@ class Boletim:
     def __init__(self):
         self.token = secrets.token_urlsafe()
         self.indisponivel = False
+        self.arvores = {}
+        self.blobs = {}
         self.trocar_edicao(1)
 
     def trocar_edicao(self, numero):
@@ -31,6 +34,18 @@ class Boletim:
             "site/notas.md": b"Rascunho",
             "outra-pasta/index.html": b"Arquivo fora do site",
         }
+        self.comitar()
+
+    def comitar(self):
+        itens = []
+        for nome, dados in sorted(self.arquivos.items()):
+            sha = sha_blob(dados)
+            self.blobs[sha] = dados
+            itens.append(dict(path=nome, type="blob", mode="100644", sha=sha, size=len(dados)))
+        corpo = json.dumps({"tree": itens, "truncated": False}).encode()
+        self.arvore = hashlib.sha1(corpo).hexdigest()
+        self.arvores[self.arvore] = corpo
+        self.commit = hashlib.sha1(("commit " + self.arvore).encode()).hexdigest()
 
     def responder(self, req):
         if req.headers.get("Authorization") != f"Bearer {self.token}":
@@ -39,16 +54,19 @@ class Boletim:
         if self.indisponivel:
             req.send_error(503)
             return
-        base = "/repos/exemplo/boletim/git"
-        if req.path == base + "/trees/main?recursive=1":
-            itens = [dict(path=nome, type="blob", mode="100644", sha=sha_blob(dados),
-                          size=len(dados)) for nome, dados in self.arquivos.items()]
-            req.enviar(json.dumps({"tree": itens, "truncated": False}).encode(), "application/json")
+        base = "/repos/exemplo/boletim"
+        if req.path == base + "/branches/main":
+            revisao = {"commit": {"sha": self.commit, "commit": {"tree": {"sha": self.arvore}}}}
+            req.enviar(json.dumps(revisao).encode(), "application/json")
             return
-        for dados in self.arquivos.values():
-            if req.path == base + "/blobs/" + sha_blob(dados):
-                req.enviar(dados, "application/octet-stream")
-                return
+        arvore = req.path.removeprefix(base + "/git/trees/").removesuffix("?recursive=1")
+        if arvore in self.arvores:
+            req.enviar(self.arvores[arvore], "application/json")
+            return
+        sha = req.path.removeprefix(base + "/git/blobs/")
+        if sha in self.blobs:
+            req.enviar(self.blobs[sha], "application/octet-stream")
+            return
         req.send_error(404)
 
 
@@ -97,12 +115,16 @@ def demonstrar(intervalo, manter):
         agenda = ciclos(origem, base, site, intervalo)
         etapas = [
             ("Primeira publicação", "PUBLICADO", 1),
-            ("Mesma versão na origem", "SEM MUDANÇA", 1),
+            ("Mesmo commit na branch", "SEM MUDANÇA", 1),
+            ("Novo commit só de documentação", "SEM MUDANÇA", 1),
             ("Queda da API de origem", "ERRO", 1),
             ("API recuperada com nova edição", "PUBLICADO", 2),
         ]
         for titulo, estado, edicao in etapas:
             boletim.indisponivel = estado == "ERRO"
+            if titulo == "Novo commit só de documentação":
+                boletim.arquivos["README.md"] = b"Nova nota de uso"
+                boletim.comitar()
             if edicao == 2:
                 boletim.trocar_edicao(2)
             sucesso, mensagem = next(agenda)
@@ -123,7 +145,7 @@ def demonstrar(intervalo, manter):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--intervalo", type=int, default=2, metavar="SEGUNDOS")
-    parser.add_argument("--manter", action="store_true", help="mantém o site aberto após os quatro ciclos")
+    parser.add_argument("--manter", action="store_true", help="mantém o site aberto após os cinco ciclos")
     args = parser.parse_args()
     if args.intervalo < 1:
         parser.error("o intervalo deve ser positivo")

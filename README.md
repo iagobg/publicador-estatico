@@ -6,26 +6,28 @@ Uma VPS acompanha uma pasta de um repositório no GitHub, publica os arquivos qu
 
 Quem hospeda um site de terceiros pode ter autorização para ler e republicar os arquivos, enquanto a administração do repositório fica com outra equipe. Nesse cenário, configurar GitHub Actions ou webhooks na origem depende de quem a mantém. Conferir a branch e copiar os arquivos manualmente pode deixar uma atualização passar. Durante a cópia, um visitante também pode receber arquivos de duas edições diferentes.
 
-O operador escolhe a pasta publicável, e a VPS inicia todas as consultas. Uma edição repetida custa uma consulta à árvore e zero downloads de arquivos. O repositório inclui um boletim em HTML e CSS para experimentar o fluxo completo.
+O operador escolhe a pasta publicável, e a VPS inicia todas as consultas. Quando a branch permanece no mesmo commit já processado, uma consulta ao GitHub encerra o ciclo. A árvore e os arquivos só são examinados se necessário. O repositório inclui um boletim em HTML e CSS para experimentar o fluxo completo.
 
 ## Como funciona
 
 ```mermaid
 flowchart TD
-    A["Polling na VPS"] --> B["GitHub REST · árvore da branch em JSON"]
-    B --> C["Python seleciona caminhos e hashes dos arquivos estáticos"]
-    C --> D{"O conjunto publicado mudou?"}
-    D -->|Não| A
-    D -->|Sim| E["Baixa os blobs por hash e prepara a versão em disco"]
-    E --> F["Troca o link current de forma atômica"]
-    F --> G["Lê cada arquivo pelo servidor web e confere os bytes"]
-    G -->|Confere| H["Registra a versão confirmada"]
-    G -->|Falha| I["Restaura a última versão confirmada"]
-    H --> A
-    I --> A
+    A["Consultar o SHA do commit da branch"] --> B{"Commit já processado para a edição ativa?"}
+    B -->|Sim| W["Aguardar o próximo ciclo"]
+    B -->|Não| C["Ler a árvore desse commit e filtrar caminhos e hashes"]
+    C --> D{"Arquivos do site mudaram?"}
+    D -->|Não| H["Registrar o commit processado"]
+    D -->|Sim| E["Preparar a edição e trocar current"]
+    E --> F{"GET pelo servidor web confirma os bytes?"}
+    F -->|Sim| G["Confirmar a edição"] --> H
+    F -->|Não| I["Restaurar a edição anterior e registrar o erro"] --> W
+    H --> W
+    W --> A
 ```
 
-A árvore da branch chega em JSON. O Python filtra por pasta, tipo de objeto, extensão e caminho. Para cada arquivo selecionado, guarda o caminho relativo, o tamanho e o identificador Git do conteúdo (*blob*). A lista ordenada de caminhos e hashes define a versão do site. Uma alteração apenas no README da origem, por exemplo, preserva a edição publicada.
+A API da branch fornece o SHA do commit e o identificador da árvore correspondente na mesma resposta. O publicador compara o commit com o último processado para aquela origem, branch, pasta e edição ativa. Se for o mesmo, a próxima consulta fica para depois do intervalo de polling.
+
+Ao encontrar um commit novo, o Python pede a árvore pelo identificador recebido e filtra os arquivos da pasta publicável. A lista ordenada de caminhos e hashes define a edição do site. Se só o README mudou, o programa registra o novo commit e mantém a edição anterior, sem baixar os arquivos. Um deploy que falha fica pendente para nova tentativa.
 
 Os downloads usam os hashes da árvore consultada. Assim, mesmo que a branch avance durante a cópia, os arquivos pertencem à mesma fotografia da origem. O publicador monta a pasta inteira antes de trocar `current`, a raiz do servidor web. Depois da troca, faz um GET de cada arquivo e compara seu conteúdo com o hash de origem. Se a leitura falhar, restaura o apontamento anterior. Na primeira publicação, a confirmação bem-sucedida estabelece a primeira versão recuperável.
 
@@ -34,7 +36,7 @@ Os downloads usam os hashes da árvore consultada. Assim, mesmo que a branch ava
 | Componente | Papel |
 | --- | --- |
 | Python 3.10+ em Linux | `urllib` faz as requisições, `json` interpreta a árvore, `hashlib` verifica os conteúdos e `fcntl` impede ciclos simultâneos. |
-| API REST do GitHub por HTTPS | Consulta a árvore de uma branch e baixa os blobs por identificador. Um token Bearer pode conceder leitura de conteúdo. [Git Trees](https://docs.github.com/en/rest/git/trees#get-a-tree) · [Git Blobs](https://docs.github.com/en/rest/git/blobs#get-a-blob) |
+| API REST do GitHub por HTTPS | Lê o commit da branch, a árvore imutável e os blobs necessários. Um token Bearer pode conceder leitura de conteúdo. [Branches](https://docs.github.com/en/rest/branches/branches#get-a-branch) · [Git Trees](https://docs.github.com/en/rest/git/trees#get-a-tree) · [Git Blobs](https://docs.github.com/en/rest/git/blobs#get-a-blob) |
 | Servidor HTTP da VPS | Serve a pasta ativa e responde à verificação independente do publicador. O exemplo de operação usa o Caddy. [Caddy file_server](https://caddyserver.com/docs/caddyfile/directives/file_server) |
 | systemd | Mantém o processo de polling ativo na VPS e direciona a saída para o journal. |
 
@@ -53,7 +55,7 @@ cd publicador-estatico
 python3 demo.py --manter
 ```
 
-Abra no navegador o endereço de loopback que o programa imprimir. Ele escolhe portas livres, cria uma área temporária e executa quatro ciclos com o mesmo publicador usado na VPS. A origem é uma simulação local da API com um token gerado em memória. O servidor de arquivos atende requisições HTTP reais. Pressione Enter no final para liberar as portas.
+Abra no navegador o endereço de loopback que o programa imprimir. Ele escolhe portas livres, cria uma área temporária e executa cinco ciclos com o mesmo publicador usado na VPS. A origem é uma simulação local da API com um token gerado em memória. O servidor de arquivos atende requisições HTTP reais. Pressione Enter no final para liberar as portas.
 
 **Executar com a API real do GitHub**
 
@@ -100,16 +102,16 @@ Para instalação persistente, siga o procedimento com usuário de serviço, rai
 
 ## Exemplos de execução
 
-**Com a API real do GitHub.** A partir de um clone novo, o publicador consultou a branch pública e ativou o boletim. Um cliente HTTP leu o HTML e o CSS do servidor local e comparou os bytes com os arquivos do clone. O segundo ciclo reconheceu a mesma versão.
+**Com a API real do GitHub.** A partir de um clone novo, o publicador consultou a branch pública e ativou o boletim. Um cliente HTTP leu o HTML e o CSS do servidor local e comparou os bytes com os arquivos do clone. O segundo ciclo reconheceu o SHA já processado e dispensou a consulta à árvore.
 
 ![Teste com api.github.com: dois arquivos confirmados, ciclo repetido sem downloads e duas respostas HTTP 200 com conteúdo idêntico ao clone.](docs/github-real.png)
 
 **Falha e recuperação reproduzíveis.**
-Captura de uma execução de `python3 demo.py --intervalo 1`. Na terceira consulta, a origem devolveu HTTP 503. Logo abaixo, o GET feito como visitante retornou HTTP 200 com a edição 1. A última consulta publicou a edição 2 e verificou os dois arquivos pelo servidor.
+Captura de uma execução de `python3 demo.py --intervalo 1`. O segundo ciclo dispensou a árvore. No terceiro, um commit só de documentação manteve a edição 1. Na quarta consulta, a origem devolveu HTTP 503. Logo abaixo, o GET feito como visitante retornou HTTP 200 com a edição 1. A última consulta publicou a edição 2 e verificou os dois arquivos pelo servidor.
 
-![Terminal com quatro ciclos: primeira edição publicada, versão repetida, falha HTTP 503 com a página ainda acessível e publicação da edição 2.](docs/demonstracao.png)
+![Cinco ciclos com publicação, SHA repetido, alteração documental, falha HTTP 503 e recuperação com a edição 2.](docs/demonstracao.png)
 
-O comando abaixo testa filtragem, autenticação, bloqueio de concorrência, recuperação após interrupção e reversão de uma versão servida incorretamente.
+Os testes cobrem SHA repetido, commit documental, migração de estado, mudança de pasta, avanço da branch durante o download, autenticação, filtragem, concorrência e recuperação de falhas.
 
 ```bash
 python3 -m unittest discover -s tests -v
@@ -117,6 +119,6 @@ python3 -m unittest discover -s tests -v
 
 ## Melhorias futuras
 
-- Usar requisições condicionais com ETag para reduzir a transferência da árvore nos ciclos sem alterações.
+- Usar consultas condicionais com ETag para reduzir também a transferência de metadados da branch.
 - Respeitar o tempo de espera indicado pela API quando a cota de consultas se esgotar.
 - Validar referências locais de HTML e CSS antes da troca, para identificar recursos que o autor esqueceu de incluir.
