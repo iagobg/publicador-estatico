@@ -1,0 +1,13 @@
+:root {
+  font-family: "Trebuchet MS", sans-serif;
+  color: #183a35;
+  background: #eff4ed;
+}
+main {
+  max-width: 36rem;
+  margin: 12vh auto;
+  padding: 2rem;
+  border-top: 0.35rem solid #26705e;
+}
+h1 { font-family: Georgia, serif; font-size: clamp(2rem, 6vw, 3.5rem); }
+#edicao { font-weight: bold; }

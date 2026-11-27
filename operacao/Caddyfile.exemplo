@@ -1,0 +1,5 @@
+# Bloco para uma VPS com Caddy. Valide junto da configuração existente.
+http://127.0.0.1:8080 {
+    root * /var/lib/publicador-estatico/current
+    file_server
+}

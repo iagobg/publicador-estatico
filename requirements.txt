@@ -1,0 +1,1 @@
+# Python 3.10+ em Linux. O projeto usa apenas a biblioteca padrão.
